@@ -565,7 +565,7 @@ def recommend_users(sla_model, user_embeddings):
 
     # Read the file into a pandas DataFrame
     df = pd.read_csv(file_path, dtype=str)
-    
+
     # Iterate through the data and populate the graph
     recommendations = {}
     index_to_user_id = {}
@@ -740,11 +740,6 @@ def main():
     # Define the loss function for SLA
     def edge_loss(h_sla):
         loss = -torch.log(1 / (1 + torch.exp(h_sla)))
-        return loss
-    
-    # Define the loss function for SLA
-    def edge_loss(h_sla):
-        loss = -torch.log(1 / (1 + torch.exp(h_sla)))
         return loss.mean()  # Take the mean of the loss tensor
 
     # Define the optimizer for SLA
@@ -805,9 +800,11 @@ def main():
         for recommended_user_id in recommended_user_ids:
             print(recommended_user_id)
     
-    # Call the recommend_users function to get recommendations
+    # Define the necessary variables
+    health_food_embeddings = 'N/A'
+    health_foods_list = 'N/A'
     recommendations = recommend_users(sla, embeddings_nla)
-            
+                
     # Read the ground truth ratings into a dictionary
     ground_truth_ratings = {}
     for file in files_to_read:
