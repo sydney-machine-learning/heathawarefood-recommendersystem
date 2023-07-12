@@ -565,11 +565,13 @@ def recommend_users(sla_model, user_embeddings):
 
     # Read the file into a pandas DataFrame
     df = pd.read_csv(file_path, dtype=str)
-
+    
     # Iterate through the data and populate the graph
     recommendations = {}
     index_to_user_id = {}
     user_id_to_index = {}
+    health_food_embeddings = None
+    health_foods_list = None
     user_id_to_recipe_ids = {}  # New dictionary to store recipe IDs for each user
     for i in range(len(df)):
         uid = df.loc[i, 'user_id']
@@ -588,6 +590,39 @@ def recommend_users(sla_model, user_embeddings):
         if uid not in user_id_to_recipe_ids:
             user_id_to_recipe_ids[uid] = []
         user_id_to_recipe_ids[uid].append(rid)
+       
+    # Extracting HF (Healthy Foods), HI (Healthy Food Ingredients), and HN (Healthy Food Nutrients)
+    if health_food_embeddings is not None:
+        HF = health_food_embeddings.detach().cpu().numpy()  # Convert tensor to numpy array
+        HI = set()  # Set to store unique healthy food ingredients
+        HN = set()  # Set to store unique healthy food nutrients
+
+        for i, embedding in enumerate(HF):
+            ingredients = [health_foods_list[j] for j, value in enumerate(embedding) if value > 0]
+            nutrients = [health_foods_list[j] for j, value in enumerate(embedding) if value <= 0]
+            HI.update(ingredients)
+            HN.update(nutrients)
+
+        HI = list(HI)  # Convert back to list
+        HN = list(HN)  # Convert back to list
+
+        # Calculate PUI
+        PUI = 0.0
+        if len(HI) > 0:
+            for I_i in HI:
+                count = sum(1 for I in HI if I_i in I)
+                PUI += (count / len(HI))
+            PUI /= len(HI)
+
+        # Calculate PUN
+        PUN = 0.0
+        if len(HN) > 0:
+            for N_j in HN:
+                count = sum(1 for N in HN if N_j in N)
+                PUN += (count / len(HN))
+            PUN /= len(HN)
+        else:
+            PUN = 0.0
 
     for i, user_embedding in enumerate(user_embeddings):
         similarities = cosine_similarity(user_embedding.unsqueeze(0), user_embeddings)
@@ -619,8 +654,7 @@ def evaluate_recommendations(recommendations, ground_truth_ratings, test_size=0.
         print("Insufficient data for evaluation.")
         return None
 
-    # Perform train-test split
-    from sklearn.model_selection import train_test_split
+    # Perform train-test split   
     true_ratings_train, true_ratings_test, recommended_ratings_train, recommended_ratings_test = train_test_split(
         true_ratings, recommended_ratings, test_size=test_size, random_state=42)
 
@@ -654,11 +688,11 @@ def main():
     # Read the file into a pandas DataFrame
     df = pd.read_csv(file_path, dtype=str)
     
-    # Call the process_data function
-    process_data(folder_path, files_to_read)
+    # # Call the process_data function
+    # process_data(folder_path, files_to_read)
     
-    # Call the Heterogeneous_Graph function
-    Heterogeneous_Graph(df)
+    # # Call the Heterogeneous_Graph function
+    # Heterogeneous_Graph(df)
 
     # Call the find_paths_users_interests function
     paths = find_paths_users_interests(df)
@@ -801,8 +835,6 @@ def main():
             print(recommended_user_id)
     
     # Define the necessary variables
-    health_food_embeddings = 'N/A'
-    health_foods_list = 'N/A'
     recommendations = recommend_users(sla, embeddings_nla)
                 
     # Read the ground truth ratings into a dictionary
