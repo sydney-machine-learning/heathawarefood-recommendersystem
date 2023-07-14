@@ -32,6 +32,13 @@ import torch.nn.utils.rnn as rnn_utils
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import LabelEncoder
 
+folder_path = r"C:\Food"
+files_to_read = ['RAW_interactions.csv', 'RAW_recipes.csv', 'PP_recipes.csv']
+file_path = r"C:\Food\RAW_recipes.csv"
+
+# Read the file into a pandas DataFrame
+df = pd.read_csv(file_path, dtype=str)
+
 def process_data(folder_path, files_to_read):
     # Create a dictionary to store user_id as key and total score and count as values
     user_scores = {}
@@ -84,12 +91,7 @@ def process_data(folder_path, files_to_read):
         print()
         
 def Heterogeneous_Graph(df):
-    # Specify the file path
-    file_path = r"C:\Food\RAW_recipes.csv"
-    
-    # Read the file into a pandas DataFrame
-    df = pd.read_csv(file_path, dtype=str)
-    
+        
     # Create an empty graph
     G = nx.MultiGraph()
     # Iterate through the data and populate the graph
@@ -263,12 +265,6 @@ class HeterogeneousDataset(Dataset):
         return uid, rid, ing, label
 
 def find_paths_users_interests(df):
-    # Specify the file path
-    file_path = r"C:\Food\RAW_recipes.csv"
-
-    # Read the file into a pandas DataFrame
-    df = pd.read_csv(file_path, dtype=str)
-
     # Create an empty graph
     G = nx.MultiGraph()
 
@@ -449,12 +445,7 @@ class SLA(nn.Module):
         return aggregated_ingredients
 
 def find_healthy_foods(df):
-    # Specify the file path
-    file_path = r"C:\Food\RAW_recipes.csv"
-
-    # Read the file into a pandas DataFrame
-    df = pd.read_csv(file_path, dtype=str)
-
+    
     # Create an empty graph
     G = nx.MultiGraph()
 
@@ -560,12 +551,7 @@ def find_healthy_foods(df):
     return paths_tensor
 
 def recommend_users(sla_model, user_embeddings):
-    # Specify the file path
-    file_path = r"C:\Food\RAW_recipes.csv"
-
-    # Read the file into a pandas DataFrame
-    df = pd.read_csv(file_path, dtype=str)
-    
+        
     # Iterate through the data and populate the graph
     recommendations = {}
     index_to_user_id = {}
@@ -681,18 +667,12 @@ def evaluate_recommendations(recommendations, ground_truth_ratings, test_size=0.
     return auc_score_train, ndcg_score_train, recall_score_train, auc_score_test, ndcg_score_test, recall_score_test
 
 def main():
-    folder_path = r"C:\Food"
-    files_to_read = ['RAW_interactions.csv', 'RAW_recipes.csv', 'PP_recipes.csv']
-    file_path = r"C:\Food\RAW_recipes.csv"
-
-    # Read the file into a pandas DataFrame
-    df = pd.read_csv(file_path, dtype=str)
+        
+    # Call the process_data function
+    process_data(folder_path, files_to_read)
     
-    # # Call the process_data function
-    # process_data(folder_path, files_to_read)
-    
-    # # Call the Heterogeneous_Graph function
-    # Heterogeneous_Graph(df)
+    # Call the Heterogeneous_Graph function
+    Heterogeneous_Graph(df)
 
     # Call the find_paths_users_interests function
     paths = find_paths_users_interests(df)
