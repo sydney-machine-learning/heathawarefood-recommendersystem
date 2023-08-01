@@ -306,7 +306,7 @@ def find_paths_users_interests(df):
                 G.add_edge(rid, nutrition_item, edge_type='nutrition')
 
     # Calculate the average rating for each recipe_id and create a new column 'avg_rating'
-    df['avg_rating'] = df.groupby('recipe_id')['rating'].transform(lambda x: math.floor(x.mean()))
+    df['avg_rating'] = df.groupby('recipe_id')['rating'].mean()
 
     # Print the meta-path
     meta_path = ['user_id', 'recipe_id', 'ingredient', 'nutrition']
@@ -483,7 +483,7 @@ def find_healthy_foods(df):
                 G.add_edge(rid, nutrition_item, edge_type='nutrition')
 
     # Calculate the average rating for each recipe_id and create a new column 'avg_rating'
-    df['avg_rating'] = df.groupby('recipe_id')['rating'].transform(lambda x: math.floor(x.mean()))
+    df['avg_rating'] = df.groupby('recipe_id')['rating'].mean()
 
     # Print the meta-path
     meta_path = ['user_id', 'recipe_id', 'ingredient', 'nutrition']
