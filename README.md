@@ -5,8 +5,11 @@ This repository contains the code for the paper "Health-aware Food Recommendatio
 The dataset consists of three files:
 
 RAW_interactions.csv: This file contains user_id, recipe_id, and rating information.
-RAW_recipes.csv: This file includes recipe_id, nutrition details, and ingredients.
+RAW_recipes.csv: This file includes recipe_id, nutrition_health, and ingredients.
 PP_recipes.csv: This file contains recipe_id and corresponding ingredient_tokens.
+
+We have compiled three files containing relevant information for this research into a single zip file.
+
 2. process_data function
 The process_data function reads the dataset files and extracts relevant information, such as user_id, rating, recipe_id, and the associated ingredients and nutrition. It utilizes these data points to construct a heterogeneous graph representation.
 
