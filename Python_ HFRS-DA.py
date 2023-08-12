@@ -78,7 +78,7 @@ def process_data(folder_path, files_to_read):
     recipe_id = df['recipe_id']
     ingredients = df['ingredients']
     nutrition = df['nutrition']
-    ingredient_tokens = df['ingredient_tokens']
+    nutrition_health = df['nutrition_health']
 
     # Print the first 10 user_ids along with their information
     for i in range(min(3, len(df))):
@@ -87,7 +87,7 @@ def process_data(folder_path, files_to_read):
         rat = df.loc[i, 'rating']
         ing = df.loc[i, 'ingredients']
         nut = df.loc[i, 'nutrition']
-        ing_t = df.loc[i, 'ingredient_tokens']
+        ing_t = df.loc[i, 'nutrition_health']
 
         print(f"User ID: {uid}")
         print(f"Recipe ID: {rid}")
@@ -316,21 +316,19 @@ def find_paths_users_interests(df):
     for uid in G.nodes():
         if G.nodes[uid]['node_type'] == 'user':
             user_rated_recipes = [rid for rid in G.neighbors(uid) if G.nodes[rid]['node_type'] == 'recipe']
-            has_rated_recipe = any(rid in df['recipe_id'].values.tolist() for rid in user_rated_recipes)
-            if has_rated_recipe:
-                for rid in user_rated_recipes:
-                    if df.loc[df['recipe_id'] == rid, 'rating'].iloc[0] >= df.loc[df['recipe_id'] == rid, 'avg_rating'].iloc[0]:
-                        ingredient_node = None
-                        nutrition_node = None
-                        
-                        for node in G.neighbors(rid):
-                            if G.nodes[node]['node_type'] == 'ingredients':
-                                ingredient_node = node
-                            elif G.nodes[node]['node_type'] == 'nutrition':
-                                nutrition_node = node
-                        
-                        if ingredient_node and nutrition_node:
-                            paths.append([uid, rid, ingredient_node, nutrition_node])
+            for rid in user_rated_recipes:
+                if df.loc[df['recipe_id'] == rid, 'rating'].iloc[0] >= df.loc[df['recipe_id'] == rid, 'avg_rating'].iloc[0]:
+                    ingredient_node = None
+                    nutrition_node = None
+
+                    for node in G.neighbors(rid):
+                        if G.nodes[node]['node_type'] == 'ingredients':
+                            ingredient_node = node
+                        elif G.nodes[node]['node_type'] == 'nutrition':
+                            nutrition_node = node
+
+                    if ingredient_node and nutrition_node:
+                        paths.append([uid, rid, ingredient_node, nutrition_node])
 
     # Encode the paths using label encoders
     user_encoder = LabelEncoder()
@@ -354,67 +352,6 @@ def find_paths_users_interests(df):
 
     return paths_tensor, meta_path
 
-# Define the NLA class
-class NLA(nn.Module):
-    def __init__(self, num_users, num_recipes, num_ingredients, num_nutrition, embedding_dim, paths):
-        super(NLA, self).__init__()
-
-        # Embedding layers
-        self.user_embedding = nn.Embedding(num_users, embedding_dim)
-        self.recipe_embedding = nn.Embedding(num_recipes, embedding_dim)
-        self.ingredient_embedding = nn.Embedding(num_ingredients, embedding_dim)
-        self.nutrition_embedding = nn.Embedding(num_nutrition, embedding_dim)
-
-        # Attention mechanism
-        self.attention = nn.Sequential(
-            nn.Linear(embedding_dim, 1),
-            nn.Softmax(dim=1)
-        )
-
-        # Convert the paths to tensors
-        self.paths = torch.tensor(paths) if paths is not None else None
-
-    def forward(self, uid, rid, ing):
-        user_emb = self.user_embedding(uid)
-        recipe_emb = self.recipe_embedding(rid)
-        ingredient_emb = self.ingredient_embedding(ing)
-
-        if self.paths is not None:
-            path_scores = torch.zeros(uid.size(0), len(self.paths))
-            for i, path in enumerate(self.paths):
-                path = torch.tensor(path)
-                matching_uid = torch.where(uid == path[0])[0]
-                matching_rid = torch.where(rid == path[1])[0]
-                matching_ing = torch.where(ing == path[2])[0]
-                
-                # Check if there are any matching indices
-                if matching_uid.size(0) > 0 and matching_rid.size(0) > 0 and matching_ing.size(0) > 0:
-                    matching_count = min(matching_uid.size(0), matching_rid.size(0), matching_ing.size(0))
-                    matching_indices = torch.stack((matching_uid[:matching_count], matching_rid[:matching_count], matching_ing[:matching_count]))
-                    path_scores[matching_indices] += 1
-
-            # Apply attention to ingredient embeddings
-            attention_scores = self.attention(ingredient_emb)
-            attention_scores = attention_scores.view(attention_scores.size(0), attention_scores.size(1), 1)
-            weighted_ingredients = attention_scores * ingredient_emb
-            aggregated_ingredients = torch.sum(weighted_ingredients, dim=1)
-
-            # Determine the maximum size along dimension 0
-            max_size = max(user_emb.size(0), recipe_emb.size(0), aggregated_ingredients.size(0))
-
-            # Pad tensors to match the maximum size along dimension 0
-            user_emb = F.pad(user_emb, (0, 0, 0, max_size - user_emb.size(0)))
-            recipe_emb = F.pad(recipe_emb, (0, 0, 0, max_size - recipe_emb.size(0)))
-            aggregated_ingredients = F.pad(aggregated_ingredients, (0, 0, 0, max_size - aggregated_ingredients.size(0)))
-
-            # Concatenate and return the final embedding
-            node_embeddings = torch.cat((user_emb, recipe_emb, aggregated_ingredients), dim=1)
-        else:
-            # Concatenate the embeddings without attention
-            node_embeddings = torch.cat((user_emb, recipe_emb, ingredient_emb), dim=1)
-
-        return node_embeddings
-
 # Define the SLA class
 class SLA(nn.Module):
     def __init__(self, num_ingredients, embedding_dim):
@@ -433,16 +370,34 @@ class SLA(nn.Module):
         aggregated_ingredients = torch.sum(weighted_ingredients, dim=1)
         return aggregated_ingredients
 
-# Define the health foods list
-health_foods_list = {
-    "Proteins": 5867,
-    "Carbohydrates": 1454,
-    "Sugars": 8780,
-    "Sodium": 4914,
-    "Fat": 3035,
-    "Saturated_fats": 119590,
-    "Fibers": 10734
-}
+# Define the is_healthy function
+def is_healthy(food_data):
+    fibres = food_data[0]
+    fat = food_data[1]
+    sugar = food_data[2]
+    sodium = food_data[3]
+    protein = food_data[4]
+    saturated_fat = food_data[5]
+    carbohydrates = food_data[6]
+    
+    conditions_met = 0
+    
+    if fibres > 10:
+        conditions_met += 1
+    if 15 <= fat <= 30:
+        conditions_met += 1
+    if sugar < 10:
+        conditions_met += 1
+    if sodium < 5:
+        conditions_met += 1
+    if 10 <= protein <= 15:
+        conditions_met += 1
+    if saturated_fat < 10:
+        conditions_met += 1
+    if 55 <= carbohydrates <= 75:
+        conditions_met += 1
+    
+    return conditions_met >= 3
 
 def find_healthy_foods(df):
     # Create an empty graph
@@ -455,7 +410,7 @@ def find_healthy_foods(df):
         r = df.loc[i, 'rating']
         ing = df.loc[i, 'ingredients']
         nut = df.loc[i, 'nutrition']
-        ing_t = df.loc[i, 'ingredient_tokens']
+        ing_t = df.loc[i, 'nutrition_health']
 
         # Add user_id, recipe_id, ingredients, and nutrition as nodes
         G.add_node(uid, node_type='user')
@@ -493,21 +448,19 @@ def find_healthy_foods(df):
     for uid in G.nodes():
         if G.nodes[uid]['node_type'] == 'user':
             user_rated_recipes = [rid for rid in G.neighbors(uid) if G.nodes[rid]['node_type'] == 'recipe']
-            has_rated_recipe = any(rid in df['recipe_id'].values.tolist() for rid in user_rated_recipes)
-            if has_rated_recipe:
-                for rid in user_rated_recipes:
-                    if df.loc[df['recipe_id'] == rid, 'rating'].iloc[0] >= df.loc[df['recipe_id'] == rid, 'avg_rating'].iloc[0]:
-                        ingredient_node = None
-                        nutrition_node = None
+            for rid in user_rated_recipes:
+                if df.loc[df['recipe_id'] == rid, 'rating'].iloc[0] >= df.loc[df['recipe_id'] == rid, 'avg_rating'].iloc[0]:
+                    ingredient_node = None
+                    nutrition_node = None
 
-                        for node in G.neighbors(rid):
-                            if G.nodes[node]['node_type'] == 'ingredients':
-                                ingredient_node = node
-                            elif G.nodes[node]['node_type'] == 'nutrition':
-                                nutrition_node = node
+                    for node in G.neighbors(rid):
+                        if G.nodes[node]['node_type'] == 'ingredients':
+                            ingredient_node = node
+                        elif G.nodes[node]['node_type'] == 'nutrition':
+                            nutrition_node = node
 
-                        if ingredient_node and nutrition_node:
-                            paths.append([uid, rid, ingredient_node, nutrition_node])
+                    if ingredient_node and nutrition_node:
+                        paths.append([uid, rid, ingredient_node, nutrition_node])
 
     healthy_foods = set()
 
@@ -519,15 +472,13 @@ def find_healthy_foods(df):
                 user_rated_recipes = [rid for rid in G.neighbors(uid) if G.nodes[rid]['node_type'] == 'recipe']
                 for rid in user_rated_recipes:
                     if G.get_edge_data(uid, rid)[0]['weight'] >= avg_rating:
-                        ingredients_tokens = [int(token) for token in ing_t.split(',') if token.strip().isdigit()]
-                        num_health_foods = sum(1 for food_num in health_foods_list.values() if food_num in ingredients_tokens)
-                        if num_health_foods >= 3:
+                        nutrition_health = [int(token) for token in df[df['recipe_id'] == rid]['nutrition_health'].iloc[0].split(',') if token.strip().isdigit()]
+                        if is_healthy(nutrition_health):  # Use the is_healthy function here
                             healthy_foods.add(rid)
 
     # Encode the paths using label encoders
     recipe_encoder = LabelEncoder()
     recipe_encoder.fit(list(healthy_foods))
-
     encoded_paths = [[path[1]] for path in paths if path[1] in healthy_foods]
 
     # Convert paths to tensors
@@ -550,14 +501,18 @@ def rate_healthy_recipes_for_user(user_id, df):
         avg_rating = user_data[user_data['recipe_id'] == rid]['avg_rating'].iloc[0]
         rating = user_data[user_data['recipe_id'] == rid]['rating'].iloc[0]
         if rating >= avg_rating:
-            ingredients_tokens = [int(token) for token in user_data[user_data['recipe_id'] == rid]['ingredient_tokens'].iloc[0].split(',') if token.strip().isdigit()]
-            num_health_foods = sum(1 for food_num in health_foods_list.values() if food_num in ingredients_tokens)
-            if num_health_foods >= 3:
+            nutrition_health = [int(token) for token in user_data[user_data['recipe_id'] == rid]['nutrition_health'].iloc[0].split(',') if token.strip().isdigit()]
+            if is_healthy(nutrition_health):
                 user_healthy_recipes.add(rid)
 
+    print("Healthy recipes for user:", user_id)
+    for recipe_id in user_healthy_recipes:
+        print("Recipe ID:", recipe_id)
+
     return user_healthy_recipes
+
     
-def recommend_users(sla_model, user_embeddings):
+def recommend_users(user_embeddings):
     # Calculate the cosine similarity between all pairs of user embeddings
     all_similarities = cosine_similarity(user_embeddings, user_embeddings)
 
@@ -802,26 +757,32 @@ def main():
 
     # Print the total loss
     print("Total Loss:", total_loss)
-    
-    top_k = 10  # Number of top similar users to recommend
-
+        
     # Recommendation step using SLA embeddings
+    top_k = 10  # Number of top similar users to recommend
     index_to_user_id = {index: user_id for index, user_id in enumerate(user_encoder.classes_)}
+
+    # Convert aggregated_ingredients to NumPy array
+    aggregated_ingredients_np = aggregated_ingredients.detach().numpy()
+
+    # Calculate cosine similarity between aggregated embeddings
+    all_similarities = cosine_similarity(aggregated_ingredients_np, aggregated_ingredients_np)
 
     recommendations = {}
     count_users = 0
 
     for user_index, user_id in index_to_user_id.items():
-        user_embedding = embeddings_nla[user_index]
+        user_embedding = aggregated_ingredients[user_index]
 
         # Calculate cosine similarities between the user and all other users
-        similarities = torch.cosine_similarity(user_embedding.unsqueeze(0), embeddings_nla)
+        user_embedding_np = user_embedding.detach().numpy()
+        similarities = cosine_similarity(user_embedding_np.reshape(1, -1), aggregated_ingredients_np)
 
         # Get the indices of the top-k most similar users
-        top_k_indices = torch.argsort(similarities, descending=True)[1:top_k + 1]
+        top_k_indices = np.argsort(similarities.ravel())[::-1][1:top_k + 1]
 
         # Map the indices to user IDs
-        recommended_user_ids = [index_to_user_id[index.item()] for index in top_k_indices]
+        recommended_user_ids = [index_to_user_id[index] for index in top_k_indices]
         recommendations[user_id] = recommended_user_ids
 
         count_users += 1
@@ -833,8 +794,7 @@ def main():
         print(f"Recommended users for {user_id}:")
         for recommended_user_id in recommended_user_ids:
             print(recommended_user_id)
-
-                            
+                         
     # Read the ground truth ratings into a dictionary
     ground_truth_ratings = {}
     for file in files_to_read:
