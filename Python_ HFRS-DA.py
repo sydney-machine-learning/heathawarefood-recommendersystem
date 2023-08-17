@@ -226,7 +226,14 @@ class NLA(nn.Module):
                     matching_count = min(matching_uid.size(0), matching_rid.size(0), matching_ing.size(0))
                     matching_indices = torch.stack((matching_uid[:matching_count], matching_rid[:matching_count], matching_ing[:matching_count]))
                     path_scores[matching_indices] += 1
-
+                    
+            # Node-Level Attention
+            k = 3  # Number of iterations
+            node_emb_theta = torch.zeros(ingredient_emb.size(0), ingredient_emb.size(1))
+            for i in range(k):
+                attention_scores = self.attention(ingredient_emb)
+                weighted_ingredients = attention_scores * ingredient_emb
+                
             # Apply attention to ingredient embeddings
             attention_scores = self.attention(ingredient_emb)
             attention_scores = attention_scores.view(attention_scores.size(0), attention_scores.size(1), 1)
