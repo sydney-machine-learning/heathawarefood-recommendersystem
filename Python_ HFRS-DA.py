@@ -1,12 +1,3 @@
-#!/usr/bin/env -S python3 -u
-#PBS -N Saman
-#PBS -l select=1:ncpus=16:mem=256gb
-#PBS -l walltime=24:00:00
-#PBS -v OMP_NUM_THREADS=16
-#PBS -j oe
-#PBS -k oed
-#PBS -M s.forouzandeh@unsw.edu.au
-#PBS -m ae
 
 import os
 import pandas as pd
@@ -283,12 +274,7 @@ class NLA(nn.Module):
                     path_scores[matching_indices] += 1
                     
             # Node-Level Attention
-            k = 3  # Number of iterations
-            node_emb_theta = torch.zeros(user_emb.size(0), user_emb.size(1))
-            for i in range(k):
-                attention_scores = F.leaky_relu(node_emb_theta, negative_slope=0.01)
-                attention_scores = F.softmax(attention_scores, dim=1)
-                weighted_attention = attention_scores.unsqueeze(2) * user_emb.unsqueeze(1)
+            weighted_attention = user_emb.unsqueeze(1) / user_emb.size(1)
 
             aggregated_attention = torch.sum(weighted_attention, dim=1)
 
@@ -1006,15 +992,4 @@ def main():
     print(f"Mean AUC Score: {mean_auc:.4f}")
     print("=====================================")
     
-    #--------------------------------------------------------------------
-    # Call the NDCG_ground_truth_ratings function
-    ND_ground_truth_ratings = NDCG_ground_truth_ratings(files_to_read, folder_path)
-
-    # Calculate and print NDCG scores for different values of k
-    similarity_threshold = 0.3  # Set your desired similarity threshold
-    for k_NDCG in range(1, 11):
-        mean_ndcg = NDCG_Evaluation(normalize_user_id_embeddings, ND_ground_truth_ratings, similarity_threshold, k_NDCG)
-        
-        print(f'NDCG Score for k={k_NDCG}: {mean_ndcg:.4f}')
-
 main()
