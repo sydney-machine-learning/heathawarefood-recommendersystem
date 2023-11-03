@@ -1,3 +1,15 @@
+#!/usr/bin/env -S python3 -u
+#PBS -N Saman
+#PBS -l select=1:ncpus=64:mem=512gb
+#PBS -l walltime=72:00:00
+#PBS -v OMP_NUM_THREADS=64
+#PBS -j oe
+#PBS -k oed
+#PBS -M s.forouzandeh@unsw.edu.au
+#PBS -m ae
+
+
+
 
 import os
 import pandas as pd
@@ -41,6 +53,9 @@ import logging
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import precision_score, recall_score, f1_score
 from sklearn.preprocessing import label_binarize
+from sklearn.model_selection import KFold
+from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedShuffleSplit
 
 
 # Configure the logging system
@@ -49,13 +64,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s: %(message)s')
 # Now you can use logging to write log messages
 logging.info('This is an informational log message.')
 
-# folder_path = '/home/z5318340'
-# files_to_read = ['Main_Dataset.zip']  
-# file_path = '/home/z5318340/Main_Dataset.zip'
+folder_path = '/home/z5318340'
+files_to_read = ['Food_Dataset_S.zip']  
+file_path = '/home/z5318340/Food_Dataset_S.zip'
 
-folder_path = r"C:\Food"
-files_to_read = ['Food_Dataset.zip']
-file_path = r"C:\Food\Food_Dataset.zip"
+# folder_path = r"C:\Food"
+# files_to_read = ['Food_Dataset.zip']
+# file_path = r"C:\Food\Food_Dataset.zip"
 
 # Read the file into a pandas DataFrame
 df = pd.read_csv(file_path)
@@ -69,12 +84,14 @@ def process_data(folder_path, files_to_read):
         file_path = os.path.join(folder_path, file)
         if os.path.isfile(file_path):
             # Read the CSV file
-            if file == 'Food_Dataset.zip':
+            if file == 'Food_Dataset_S.zip':
                 # Specify the data type for the user_id column as int
                 df = pd.read_csv(file_path, dtype={'user_id': int})
                 user_id = df['user_id']
                 recipe_id = df['recipe_id']
                 rating = df['rating']
+                ingredients = df['ingredients']
+                nutrition = df['nutrition']
 
                 # Iterate through user_id, recipe_id, and rating columns to calculate total score and count for each recipe_id
                 for i in range(len(user_id)):
@@ -86,25 +103,6 @@ def process_data(folder_path, files_to_read):
                     recipe_scores[rid]['total_score'] += r
                     recipe_scores[rid]['count'] += 1
 
-    # # Calculate the average score for each recipe_id
-    # for rid, scores in recipe_scores.items():
-    #     avg_score = scores['total_score'] / scores['count']
-    #     logging.info(f"Recipe ID: {rid}, Average Score: {avg_score}")
-
-    # Extract ingredients and nutrition from 'Food_Dataset.zip' file
-    df = pd.read_csv(os.path.join(folder_path, 'Food_Dataset.zip'))
-    recipe_id = df['recipe_id']
-    ingredients = df['ingredients']
-    nutrition = df['nutrition']
-
-    # Print the first 10 user_ids along with their information
-    for i in range(min(3, len(df))):
-        uid = df.loc[i, 'user_id']
-        rid = df.loc[i, 'recipe_id']
-        rat = df.loc[i, 'rating']
-        ing = df.loc[i, 'ingredients']
-        nut = df.loc[i, 'nutrition']
-
     # Count the number of unique user_ids
     num_unique_user_ids = df['user_id'].nunique()
     # Count the number of unique recipe_ids
@@ -113,12 +111,27 @@ def process_data(folder_path, files_to_read):
     num_unique_ingredients = df['ingredients'].nunique()
     # Count the number of unique combinations of user_id and recipe_id
     num_interactions = df[['user_id', 'recipe_id']].drop_duplicates().shape[0]
+    sparsity = (1 - (num_interactions / (num_unique_user_ids * num_unique_recipe_ids))) * 100
+       
+    # Group the data by 'user_id' and count the number of unique 'recipe_id' each user has rated
+    user_rating_counts = df.groupby('user_id')['recipe_id'].nunique()
 
+    # Now, you can create a histogram based on the number of users who have rated a certain number of items
+    user_count_histogram = user_rating_counts.value_counts().sort_index()
+
+    
     # Print the counts
     print(f"Number of unique user_ids: {num_unique_user_ids}")
     print(f"Number of unique recipe_ids: {num_unique_recipe_ids}")
     print(f"Number of interactions between users and recipes: {num_interactions}")
     print(f"Number of unique ingredients: {num_unique_ingredients}")
+    print("************************************")
+    print(f"Sparsity of the dataset: {sparsity:.2f}%")
+    print("************************************")
+    print("Number of Users per Rating Count:")
+    for count, users in user_count_histogram.items():
+        print(f" [{count}] {users} users have {count} rated recipes")
+    print("************************************")
 
 def Load_Into_Graph(df):
     """Given a data frame with columns 'user_id', 'recipe_id',
@@ -142,7 +155,6 @@ def Load_Into_Graph(df):
         decoded.
 
     """
-
     logging.info("Loading data into a graph...")
     
     # Create an empty graph
@@ -259,20 +271,6 @@ class NLA(nn.Module):
         nutrition_emb = self.nutrition_embedding(nut)
 
         if self.paths is not None:
-            path_scores = torch.zeros(uid.size(0), len(self.paths))
-            for i, path in enumerate(self.paths):
-                path = torch.tensor(path).clone().detach()
-                matching_uid = torch.where(uid == path[0])[0]
-                matching_rid = torch.where(rid == path[1])[0]
-                matching_ing = torch.where(ing == path[2])[0]
-                matching_nut = torch.where(nut == path[3])[0]  # Fix this line
-                
-                # Check if there are any matching indices
-                if matching_uid.size(0) > 0 and matching_rid.size(0) > 0 and matching_ing.size(0) > 0 and matching_nut.size(0) > 0:
-                    matching_count = min(matching_uid.size(0), matching_rid.size(0), matching_ing.size(0), matching_nut.size(0))
-                    matching_indices = torch.stack((matching_uid[:matching_count], matching_rid[:matching_count], matching_ing[:matching_count], matching_nut[:matching_count]))
-                    path_scores[matching_indices] += 1
-                    
             # Node-Level Attention
             weighted_attention = user_emb.unsqueeze(1) / user_emb.size(1)
 
@@ -294,7 +292,7 @@ class NLA(nn.Module):
 
         return node_embeddings
 
-    def train_nla(self, df, user_encoder, recipe_encoder, ingredient_encoder, nutrition_encoder, num_epochs=30):
+    def train_nla(self, df, user_encoder, recipe_encoder, ingredient_encoder, nutrition_encoder, num_epochs):
         criterion_nla = nn.MSELoss()
         optimizer_nla = optim.Adam(self.parameters(), lr=0.01)
 
@@ -469,18 +467,11 @@ class SLA(nn.Module):
 
         return node_embeddings, impression_coefficient, weight
     
-    # def edge_loss(self, impression_coefficient):
-    #     # Calculate the log loss based on the impression coefficient
-    #     log_loss = torch.log(1 / (1 + torch.exp(impression_coefficient))) 
-    #     # Sum all the log losses
-    #     loss = -torch.sum(log_loss)  
-    #     return loss
-    
     def edge_loss(self, weight):
         loss = -torch.log(1 / (1 + torch.exp(weight)))
         return loss.mean()
 
-    def train_sla(self, uid_tensor, rid_tensor, ing_tensor, nut_tensor, num_epochs_sla=30):
+    def train_sla(self, uid_tensor, rid_tensor, ing_tensor, nut_tensor, num_epochs_sla):
         optimizer_sla = optim.Adam(self.parameters(), lr=0.01)
 
         for epoch_sla in range(num_epochs_sla):
@@ -614,254 +605,367 @@ def rate_healthy_recipes_for_user(user_id, df):
         if is_healthy(nutrition_health):
             user_healthy_recipes.add(recipe_id)
 
-    # Print the results
-    # print(f"User ID: {user_id}")
-    # print("Healthy Recipes:")
-    # for recipe_id in user_healthy_recipes:
-    #     print(f"Recipe ID: {recipe_id}")
-
     return user_healthy_recipes
 
-# Recommend_users_for_healthy_recipes function
-def recommend_users_for_healthy_recipes(df, normalized_embeddings, similarity_threshold=0.3, top_n_similar=5):
+def load_ground_truth_ratings(files_to_read, folder_path):
+    ground_truth_ratings = []
+
+    for file in files_to_read:
+        if file == 'Food_Dataset_S.zip':
+            interactions_df = pd.read_csv(os.path.join(folder_path, file), dtype=str)
+            ground_truth_ratings.extend(
+                [
+                    (int(row['user_id']), int(row['recipe_id']), int(row['rating']))
+                    for _, row in interactions_df.iterrows()
+                ]
+            )
+
+    return ground_truth_ratings
+
+# def Recommendation_healthy_recipes(df, normalized_embeddings, similarity_threshold, top_k_values, top_n_popular):
+#     recommendations = {}
+#     actual_ratings = {}  # Dictionary to store actual ratings for each user
+
+#     # Calculate cosine similarities between user embeddings
+#     similarities = cosine_similarity(normalized_embeddings)
+
+#     for i, user_embedding in enumerate(normalized_embeddings):
+#         user_id = df.iloc[i]['user_id']  # Get the user_id from the DataFrame
+
+#         # Find similar users based on cosine similarity and the similarity threshold
+#         similar_users = [
+#             (j, similarity_score) for j, similarity_score in enumerate(similarities[i])
+#             if j != i and similarity_score >= similarity_threshold
+#         ]
+
+#         # Sort similar users by similarity score in descending order
+#         similar_users = sorted(similar_users, key=lambda x: x[1], reverse=True)
+
+#         # Get the value of k for this user
+#         k = top_k_values[i] if i < len(top_k_values) else k
+
+#         # Collect recipes from similar users and calculate their popularity
+#         similar_user_rated_recipes = set()
+#         for similar_user_index, _ in similar_users:
+#             similar_user_id = df.iloc[similar_user_index]['user_id']
+#             if similar_user_id != user_id:  # Exclude the user themselves from recommendations
+#                 similar_user_rated_recipes.update(df[df['user_id'] == similar_user_id]['recipe_id'])
+
+#         # Calculate popularity scores for recipes in the pool of similar users
+#         recipe_popularity = {}
+#         for recipe_id in similar_user_rated_recipes:
+#             recipe_popularity[recipe_id] = len(df[df['recipe_id'] == recipe_id])
+
+#         # Recommend the top N popular recipes from the pool
+#         popular_recipes = sorted(recipe_popularity.items(), key=lambda x: x[1], reverse=True)[:top_n_popular]
+#         recommended_recipes = {recipe_id: popularity for recipe_id, popularity in popular_recipes}
+
+#         recommendations[user_id] = recommended_recipes
+
+#         # Store actual ratings for this user
+#         actual_ratings[user_id] = {recipe_id: rating for recipe_id, rating in zip(df[df['user_id'] == user_id]['recipe_id'], df[df['user_id'] == user_id]['rating'])}
+
+#     return recommendations, actual_ratings
+
+def Recommendation_healthy_recipes(df, normalized_embeddings, similarity_threshold, top_k_values, top_n_popular):
     recommendations = {}
-    user_to_embedding = {}  # Mapping from user ID to embedding
+    actual_ratings = {}  # Dictionary to store actual ratings for each user
 
     # Calculate cosine similarities between user embeddings
     similarities = cosine_similarity(normalized_embeddings)
-    num_rows = len(df)  # Get the number of rows in the DataFrame
 
     for i, user_embedding in enumerate(normalized_embeddings):
-        if i >= num_rows:
-            break  # Ensure that i is within the valid range
-
         user_id = df.iloc[i]['user_id']  # Get the user_id from the DataFrame
 
-        # Find similar users based on cosine similarity and get the top N similar users
-        similar_users = sorted(
-            [(j, similarity_score) for j, similarity_score in enumerate(similarities[i]) if j != i and similarity_score >= similarity_threshold],
-            key=lambda x: x[1],  # Sort by similarity score
-            reverse=True  # Sort in descending order
-        )[:top_n_similar]
+        # Find similar users based on cosine similarity and the similarity threshold
+        similar_users = [
+            (j, similarity_score) for j, similarity_score in enumerate(similarities[i])
+            if j != i and similarity_score >= similarity_threshold
+        ]
 
-        # Recommend healthy recipes for the user
-        recommended_recipes = set()
+        # Sort similar users by similarity score in descending order
+        similar_users = sorted(similar_users, key=lambda x: x[1], reverse=True)
+
+        # Get the value of k for this user
+        k = top_k_values[i] if i < len(top_k_values) else k
+
+        # Collect recipes from similar users and calculate their popularity
+        similar_user_rated_recipes = set()
         for similar_user_index, _ in similar_users:
-            if similar_user_index < num_rows:  # Check if the index is within the valid range
-                similar_user_id = df.iloc[similar_user_index]['user_id']  # Get similar user's user_id
-                # Exclude the user themselves from recommendations
-                if similar_user_id != user_id:
-                    # Exclude recipes the current user has already rated
-                    user_rated_recipes = set(df[df['user_id'] == user_id]['recipe_id'])
+            similar_user_id = df.iloc[similar_user_index]['user_id']
+            if similar_user_id != user_id:  # Exclude the user themselves from recommendations
+                similar_user_rated_recipes.update(df[df['user_id'] == similar_user_id]['recipe_id'])
 
-                    # Recommend recipes that are not rated by the current user
-                    recommended_recipes.update(recipe for recipe in df['recipe_id'] if recipe not in user_rated_recipes)
+        # Print similar_user_rated_recipes for the current user, limited to the first 5 users
+        # if i < 5:
+        #     print(f"User {user_id}'s similar_user_rated_recipes: {similar_user_rated_recipes}")
 
-                    # Limit to the top N recommendations
-                    if len(recommended_recipes) >= top_n_similar:
-                        break
+        # Calculate popularity scores for recipes in the pool of similar users
+        recipe_popularity = {}
+        for recipe_id in similar_user_rated_recipes:
+            recipe_popularity[recipe_id] = len(df[df['recipe_id'] == recipe_id])
 
-        # recommendations[user_id] = {
-        #     'most_similar_user_ids': [df.iloc[j]['user_id'] for j, _ in similar_users if j < num_rows],
-        #     'user_healthy_recipes': recommended_recipes
-        # }
+        # Recommend the top N popular recipes from the pool
+        popular_recipes = sorted(recipe_popularity.items(), key=lambda x: x[1], reverse=True)[:top_n_popular]
+        recommended_recipes = {recipe_id: popularity for recipe_id, popularity in popular_recipes}
 
-    return recommendations
+        recommendations[user_id] = recommended_recipes
 
-#---------------Evaluation Library- Three Metrics -------------------------------
-def load_ground_truth_ratings(files_to_read, folder_path):
-    ground_truth_ratings = {}
-    ground_truth_labels = set()  # Use a set to ensure unique user IDs
-    test_set_users = set()  # Use a set to ensure unique test set user IDs
+        # Store actual ratings for this user
+        actual_ratings[user_id] = {recipe_id: rating for recipe_id, rating in zip(df[df['user_id'] == user_id]['recipe_id'], df[df['user_id'] == user_id]['rating'])}
 
-    for file in files_to_read:
-        if file == 'Food_Dataset.zip':
-            interactions_df = pd.read_csv(os.path.join(folder_path, file), dtype=str)
-            for index, row in interactions_df.iterrows():
-                user_id = int(row['user_id'])  # Convert the user_id to an integer
-                recipe_id = int(row['recipe_id'])  # Convert the recipe_id to an integer
-                rating = int(row['rating'])  # Convert the rating to an integer
+        # Print recommendations and popularity counts for this user, limited to the first 5 users
+        # if i < 5:
+        #     print(f"User {user_id} Recommendations:")
+        #     for recipe_id, popularity in recommended_recipes.items():
+        #         print(f"  Recipe ID: {recipe_id}, Popularity Count: {popularity}")
+        #     print()
 
-                # Check if the user is in the test set and add to the test_set_users set
-                if user_id not in test_set_users:
-                    test_set_users.add(user_id)
+    return recommendations, actual_ratings
 
-                # Create a dictionary to store ratings for each user and each recipe if not already created
-                if user_id not in ground_truth_ratings:
-                    ground_truth_ratings[user_id] = {}
+# def calculate_ndcg(df, user_id, recommendations, k):
+#     # Extract the true relevance scores from user interactions for recommended items
+#     user_ratings = df[(df['user_id'] == user_id) & df['recipe_id'].isin(recommendations)][['recipe_id', 'rating']]
+    
+#     # Create a dictionary mapping recipe_id to its rating
+#     ratings_dict = dict(zip(user_ratings['recipe_id'], user_ratings['rating']))
+    
+#     # Calculate binary relevance scores for recommended items
+#     y_true = [1 if recipe_id in ratings_dict and ratings_dict[recipe_id] > 0 else 0 for recipe_id in recommendations]
 
-                if recipe_id not in ground_truth_ratings[user_id]:
-                    ground_truth_ratings[user_id][recipe_id] = {'positive': [], 'negative': []}
+#     # Calculate NDCG using sklearn's ndcg_score function
+#     y_score = [1 if y_true[i] == 1 else 0 for i in range(len(y_true))]
+#     ndcg = ndcg_score([y_true], [y_score], k=k)
 
-                # Classify ratings as positive or negative (you can define your own criteria)
-                if rating >= 3:
-                    ground_truth_ratings[user_id][recipe_id]['positive'].append(rating)
-                else:
-                    ground_truth_ratings[user_id][recipe_id]['negative'].append(rating)
+#     return ndcg
 
-    return ground_truth_ratings, ground_truth_labels, test_set_users
+def calculate_ndcg(df, user_id, recommendations, k):
+    # Extract the true relevance scores from user interactions for recommended items
+    user_ratings = df[(df['user_id'] == user_id) & df['recipe_id'].isin(recommendations)][['recipe_id', 'rating']]
+    
+    # Create a dictionary mapping recipe_id to its rating
+    ratings_dict = dict(zip(user_ratings['recipe_id'], user_ratings['rating']))
+    
+    # Calculate binary relevance scores for recommended items
+    y_true = [1 if recipe_id in ratings_dict and ratings_dict[recipe_id] > 0 else 0 for recipe_id in recommendations]
 
-def evaluate_recommendation_system(user_normalized_embeddings, ground_truth_ratings, k):
-    # Extract user IDs and normalized embeddings
-    user_ids, normalized_embeddings = zip(*user_normalized_embeddings)
+    # Convert y_true and y_score to numpy arrays
+    y_true = np.array(y_true).reshape(1, -1)  # Convert to a row vector
+    y_score = np.array(y_true)  # Copy y_true to y_score
 
-    # Split the data into train and test sets (80% train, 20% test)
-    X_train, X_test, y_train, y_test = train_test_split(normalized_embeddings, user_ids, test_size=0.2, random_state=42)
-
-    # Compute cosine similarity between user embeddings in the test set
-    similarity_matrix = cosine_similarity(X_test, normalized_embeddings)
-
-    # Initialize lists to store evaluation metrics
-    precision_scores = []
-    recall_scores = []
-    f1_scores = []
-
-    for i, test_user_id in enumerate(y_test):
-        # Get the cosine similarity scores for the current user
-        similarity_scores = similarity_matrix[i]
-
-        # Sort user IDs by similarity (higher similarity first)
-        similar_user_ids = [user_id for _, user_id in sorted(zip(similarity_scores, user_ids), reverse=True)]
-
-        # Get the top-k recommendations
-        recommended_user_ids = similar_user_ids[:k]
-
-        # Calculate true labels (1 if user is in ground truth ratings, 0 otherwise)
-        true_labels = [1 if user_id in ground_truth_ratings else 0 for user_id in recommended_user_ids]
-
-        # Calculate precision, recall, and F1-score using sklearn.metrics
-        precision = precision_score(true_labels, [1] * len(true_labels), zero_division=0)
-        recall = recall_score(true_labels, [1] * len(true_labels), zero_division=0)
-        f1 = f1_score(true_labels, [1] * len(true_labels), zero_division=0)
-
-        precision_scores.append(precision)
-        recall_scores.append(recall)
-        f1_scores.append(f1)
-
-    # Compute the mean of evaluation metrics
-    mean_precision = np.mean(precision_scores)
-    mean_recall = np.mean(recall_scores)
-    mean_f1 = np.mean(f1_scores)
-
-    return mean_precision, mean_recall, mean_f1
-
-#---------------Evaluation based-AUC -------------------------------
-
-def AUC_ground_truth_ratings(files_to_read, folder_path):
-    A_ground_truth_ratings = []  # A list to store ground truth ratings
-
-    for file in files_to_read:
-        if file == 'Food_Dataset.zip':
-            interactions_df = pd.read_csv(os.path.join(folder_path, file), dtype=str)
-            ratings = interactions_df['rating'].astype(int).tolist()
-            A_ground_truth_ratings.extend(ratings)
-
-    return A_ground_truth_ratings
-
-def AUC_evaluate_recommendation_system(user_normalized_embeddings, A_ground_truth_ratings):
-    # Extract user IDs and normalized embeddings
-    user_ids, normalized_embeddings = zip(*user_normalized_embeddings)
-
-    # Split the data into train and test sets (80% train, 20% test)
-    X_train, X_test, y_train, y_test = train_test_split(normalized_embeddings, user_ids, test_size=0.2, random_state=42)
-
-    # Compute cosine similarity between user embeddings in the test set
-    similarity_matrix = cosine_similarity(X_test, normalized_embeddings)
-
-    # Initialize a list to store AUC scores
-    auc_scores = []
-
-    for i, test_user_id in enumerate(y_test):
-        # Get the cosine similarity scores for the current user
-        similarity_scores = similarity_matrix[i]
-
-        # Sort user IDs by similarity (higher similarity first)
-        similar_user_ids = [user_id for _, user_id in sorted(zip(similarity_scores, user_ids), reverse=True)]
-
-        # Get all recommended user IDs
-        recommended_user_ids = similar_user_ids
-
-        # Get the ratings for the recommended recipes for the test user
-        recommended_ratings = [A_ground_truth_ratings[recipe_id] for recipe_id in recommended_user_ids]
-
-        # Calculate AUC for this user
-        auc = roc_auc_score([1 if rating >= 2 else 0 for rating in recommended_ratings], similarity_scores)
-        auc_scores.append(auc)
-
-    # Compute the mean AUC score
-    mean_auc = np.nanmean(auc_scores)
-
-    return mean_auc
-
-#------------Evaluation based-NDCG-------------------------------------------------
-
-def NDCG_ground_truth_ratings(files_to_read, folder_path):
-    ND_ground_truth_ratings = {}  # Dictionary to store ground truth ratings
-
-    for file in files_to_read:
-        if file == 'Food_Dataset.zip':
-            interactions_df = pd.read_csv(os.path.join(folder_path, file), dtype=str)
-            for index, row in interactions_df.iterrows():
-                user_id = int(row['user_id'])  # Convert the user_id to an integer
-                recipe_id = int(row['recipe_id'])  # Convert the recipe_id to an integer
-                rating = int(row['rating'])  # Convert the rating to an integer
-
-                # Create a dictionary to store ratings for each user if not already created
-                if user_id not in ND_ground_truth_ratings:
-                    ND_ground_truth_ratings[user_id] = []
-
-                # Append the rating to the user's list of ground truth ratings
-                ND_ground_truth_ratings[user_id].append(rating)
-
-    return ND_ground_truth_ratings
-
-def calculate_ndcg(true_labels, scores, k):
-    # Sort the true labels and scores by scores in descending order
-    sorted_indices = np.argsort(scores)[::-1]
-    true_labels = np.array(true_labels)[sorted_indices]
-    scores = np.array(scores)[sorted_indices]
-
-    # Calculate Discounted Cumulative Gain (DCG)
-    dcg = np.sum((2 ** true_labels - 1) / np.log2(np.arange(2, k + 2)))
-
-    # Calculate Ideal Discounted Cumulative Gain (IDCG) for perfect ranking
-    idcg = np.sum((2 ** np.sort(true_labels)[::-1] - 1) / np.log2(np.arange(2, k + 2)))
-
-    # Calculate NDCG
-    ndcg = dcg / idcg if idcg > 0 else 0.0
+    # Calculate NDCG using sklearn's ndcg_score function
+    ndcg = ndcg_score(y_true, y_score, k=k)
 
     return ndcg
 
-def NDCG_Evaluation(user_normalized_embeddings, ND_ground_truth_ratings, similarity_threshold, k):
-    # Extract user IDs and normalized embeddings
-    user_ids, normalized_embeddings = zip(*user_normalized_embeddings)
+def evaluate_recommendations_with_tp_fp_fn(df, normalized_embeddings, similarity_threshold, test_size=0.2, top_k_values=[]):
+    results = {}  # Initialize results dictionary
+    top_n_popular = 10  # You can adjust this value based on your preferences
+    # Generate recommendations using the provided function
+    recommendations, actual_ratings = Recommendation_healthy_recipes(df, normalized_embeddings, similarity_threshold, top_k_values, top_n_popular)
 
-    # Split the data into train and test sets (80% train, 20% test)
-    X_train, X_test, y_train, y_test = train_test_split(normalized_embeddings, user_ids, test_size=0.2, random_state=42)
+    # Split users into training and test sets
+    train_users, test_users = train_test_split(list(recommendations.keys()), test_size=test_size, random_state=42)
 
-    # Compute cosine similarity between user embeddings in the test set
-    similarity_matrix = cosine_similarity(X_test, normalized_embeddings)
+    # Create a list to store users with at least one true positive
+    users_with_true_positives = []  # Create a list to store users with at least one true positive
+    users_with_false_positives = []  # Create a list to store users with false positives
+    users_with_false_negatives = []  # Create a list to store users with false negatives
 
-    # Initialize lists to store NDCG scores
-    ndcg_scores = []
+    for k in top_k_values:
+        # Initialize dictionaries to store tp, fp, and fn for this value of 'k'
+        tp_dict = {}
+        fp_dict = {}
+        fn_dict = {}
 
-    for i, test_user_id in enumerate(y_test):
-        # Get the cosine similarity scores for the current user
-        similarity_scores = similarity_matrix[i]
+        for user in test_users:
+            true_positives = 0
+            false_positives_count = 0
+            false_negatives_count = 0
 
-        # Determine the top-k recommendations based on similarity scores and threshold
-        recommended_user_ids = [user_id for user_id, similarity in zip(user_ids, similarity_scores) if similarity >= similarity_threshold][:k]
+            user_actual_ratings = df[df['user_id'] == user]['recipe_id']  # Get user's actual rated recipe_ids
+            user_actual_ratings = set(user_actual_ratings)
 
-        # Check if there are recommendations
-        if recommended_user_ids:
-            # Calculate NDCG for this user using the calculate_ndcg function
-            ndcg = calculate_ndcg([1] * len(recommended_user_ids), similarity_scores[:k], k)
+            recommended_recipe_ids = set(recommendations[user])
+
+            # Calculate true positives
+            for recipe_id in recommended_recipe_ids:
+                if recipe_id in user_actual_ratings:
+                    true_positives += 1
+
+            # If a user has at least one true positive, add them to the list
+            if true_positives >= 1:
+                users_with_true_positives.append(user)
+
+            # Calculate false positives (recommended but not rated)
+            false_positives_count = len(recommended_recipe_ids - user_actual_ratings)
+            if false_positives_count > 0:
+                users_with_false_positives.append(user)
+
+            # Calculate false negatives (rated but not recommended)
+            false_negatives_count = len(user_actual_ratings - recommended_recipe_ids)
+            if false_negatives_count > 0:
+                users_with_false_negatives.append(user)
+
+            # Store tp, fp, and fn values for this user and this value of 'k'
+            tp_dict[user] = true_positives
+            fp_dict[user] = false_positives_count
+            fn_dict[user] = false_negatives_count
+
+        # Rest of the code to calculate precision, recall, f1-score, and NDCG (if needed)
+        precision_scores = []
+        recall_scores = []
+        f1_scores = []
+        ndcg_scores = []
+
+        for i, user in enumerate(test_users):
+            tp = tp_dict[user]
+            fp = fp_dict[user]
+            fn = fn_dict[user]
+
+            # Calculate precision
+            if tp + fp > 0:
+                precision = tp / (tp + fp)
+            else:
+                precision = 0
+
+            # Calculate recall
+            if tp + fn > 0:
+                recall = tp / (tp + fn)
+            else:
+                recall = 0
+
+            # Calculate F1-score
+            if precision + recall > 0:
+                f1 = 2 * (precision * recall) / (precision + recall)
+            else:
+                f1 = 0
+
+            # Calculate NDCG (if needed)
+            ndcg = calculate_ndcg(df, user, recommendations[user], k)
+
+            precision_scores.append(precision)
+            recall_scores.append(recall)
+            f1_scores.append(f1)
             ndcg_scores.append(ndcg)
 
-    # Compute the mean NDCG score
-    mean_ndcg = np.mean(ndcg_scores)
+        average_precision = sum(precision_scores) / len(precision_scores)
+        average_recall = sum(recall_scores) / len(recall_scores)
+        average_f1 = sum(f1_scores) / len(f1_scores)
+        average_ndcg = sum(ndcg_scores) / len(ndcg_scores)
 
-    return mean_ndcg
+        results[k] = {
+            'Precision': average_precision,
+            'Recall': average_recall,
+            'F1-score': average_f1,
+            'NDCG': average_ndcg
+        }
+
+    # Calculate the count of users with true positives >= 1
+    count_users_with_true_positives = len(users_with_true_positives)
+    # Calculate the count of users with false negatives >= 1
+    count_users_with_false_negatives = len(users_with_false_negatives)
+    Users_test=len(test_users)
+    
+    print(f"Number of Users: {Users_test}")
+    print(f"Number of Users with True Positives >= 1: {count_users_with_true_positives}")
+    print(f"Number of Users with Fales Negatives >= 1: {count_users_with_false_negatives}")
+
+    return results
+
+def extract_recommendations_and_ratings(df, normalized_embeddings, similarity_threshold, AUC_popular):
+    recommendations = {}
+    actual_ratings = {}
+
+    # Calculate cosine similarities between user embeddings
+    similarities = cosine_similarity(normalized_embeddings)
+
+    for i, user_embedding in enumerate(normalized_embeddings):
+        user_id = df.iloc[i]['user_id']  # Get the user_id from the DataFrame
+
+        # Find similar users based on cosine similarity and the similarity threshold
+        similar_users = [
+            (j, similarity_score) for j, similarity_score in enumerate(similarities[i])
+            if j != i and similarity_score >= similarity_threshold
+        ]
+
+        # Sort similar users by similarity score in descending order and limit to the top N
+        similar_users = sorted(similar_users, key=lambda x: x[1], reverse=True)
+
+        # Store actual user ratings
+        actual_ratings[user_id] = set(df[df['user_id'] == user_id]['recipe_id'])
+
+        # Collect recipes from similar users and calculate their popularity
+        similar_user_rated_recipes = set()
+        for similar_user_index, _ in similar_users:
+            similar_user_id = df.iloc[similar_user_index]['user_id']
+            if similar_user_id != user_id:  # Exclude the user themselves from recommendations
+                similar_user_rated_recipes.update(df[df['user_id'] == similar_user_id]['recipe_id'])
+
+        # Calculate popularity scores for recipes in the pool of similar users
+        recipe_popularity = {}
+        for recipe_id in similar_user_rated_recipes:
+            recipe_popularity[recipe_id] = len(df[df['recipe_id'] == recipe_id])
+
+        # Recommend the top N popular recipes from the pool
+        popular_recipes = sorted(recipe_popularity.items(), key=lambda x: x[1], reverse=True)[:AUC_popular]
+        recommended_recipes = [recipe_id for recipe_id, _ in popular_recipes]
+
+        # Combine similarity-based and popular recipe-based recommendations
+        recommendations[user_id] = recommended_recipes
+
+    return recommendations, actual_ratings
+
+# def calculate_Recommendation_AUC(predictions, actual_ratings, test_size=0.2):
+#     true_labels = []  # To store true labels (1 for positive) for each recipe
+#     predicted_scores = []  # To store predicted scores (e.g., reverse rank position) for each recipe
+
+#     # Compare recommended rankings with actual ratings for each user
+#     for user_id, recommended_recipes in predictions.items():
+#         rated_recipes = actual_ratings.get(user_id, [])
+
+#         # Change the random_state parameter when splitting the data
+#         train_set, test_set = train_test_split(recommended_recipes, test_size=test_size, random_state=42)
+
+#         # Iterate through the recommended recipes
+#         # for recipe_id in recommended_recipes:
+#         for recipe_id in test_set:
+#             if recipe_id in rated_recipes:
+#                 true_labels.append(1)  # True Positive: Recipe is recommended and present in actual ratings
+#             else:
+#                 true_labels.append(0)  # False Positive: Recipe is recommended but not in actual ratings
+#             predicted_scores.append(len(recommended_recipes) - recommended_recipes.index(recipe_id))
+
+#     # Calculate AUC
+#     auc = roc_auc_score(true_labels, predicted_scores)
+
+#     return auc
+
+def calculate_Recommendation_AUC(predictions, actual_ratings, test_size=0.2):
+    true_labels = []  # To store true labels (1 for positive) for each recipe
+    predicted_scores = []  # To store predicted scores (e.g., reverse rank position) for each recipe
+
+    # Compare recommended rankings with actual ratings for each user
+    for user_id, recommended_recipes in predictions.items():
+        rated_recipes = actual_ratings.get(user_id, [])
+
+        # Ensure there are items to split
+        if recommended_recipes:
+            # Change the random_state parameter when splitting the data
+            train_set, test_set = train_test_split(recommended_recipes, test_size=test_size, random_state=42)
+
+            # Iterate through the recommended recipes in the test set
+            for recipe_id in test_set:
+                if recipe_id in rated_recipes:
+                    true_labels.append(1)  # True Positive: Recipe is recommended and present in actual ratings
+                else:
+                    true_labels.append(0)  # False Positive: Recipe is recommended but not in actual ratings
+                predicted_scores.append(len(recommended_recipes) - recommended_recipes.index(recipe_id))
+
+    # Calculate AUC
+    auc = roc_auc_score(true_labels, predicted_scores)
+
+    return auc
 
 #----------------------------------------------------
 def main():
@@ -881,8 +985,6 @@ def main():
     num_ingredients = len(df['ingredients'].unique())
     num_nutrition = len(df['nutrition'].unique())
 
-    logging.info("P4) Get the unique node counts")
-
     # Initialize the label encoders and fit them with the data
     user_encoder = LabelEncoder()
     recipe_encoder = LabelEncoder()
@@ -894,13 +996,13 @@ def main():
     nutrition_encoder.fit(df['nutrition'])
     
     # Common embedding dimension
-    embedding_dim = 256
+    embedding_dim = 64
 
     # Initialize the NLA model with the common dimension
     nla_model = NLA(num_users, num_recipes, num_ingredients, num_nutrition, embedding_dim, paths_tensor)
 
     # Train the NLA model
-    NLA_loss = nla_model.train_nla(df, user_encoder, recipe_encoder, ingredient_encoder, nutrition_encoder, num_epochs=10)
+    NLA_loss = nla_model.train_nla(df, user_encoder, recipe_encoder, ingredient_encoder, nutrition_encoder, num_epochs=50)
     
     # Get and print the embeddings
     uid_tensor = torch.LongTensor(list(range(num_users)))
@@ -916,7 +1018,7 @@ def main():
     sla_for_healthy_foods = SLA(num_users, num_recipes, num_ingredients, num_nutrition, embedding_dim, paths_tensor, is_healthy=True)
     
     # Train the SLA model for healthy foods
-    sla_for_healthy_foods.train_sla(uid_tensor, rid_tensor, ing_tensor, nut_tensor, num_epochs_sla=30)
+    sla_for_healthy_foods.train_sla(uid_tensor, rid_tensor, ing_tensor, nut_tensor, num_epochs_sla=50)
 
     # Train the SLA model for healthy foods
     embeddings_for_healthy_foods, _, _ = sla_for_healthy_foods(uid_tensor, rid_tensor, ing_tensor, nut_tensor)
@@ -946,50 +1048,59 @@ def main():
 
     # normalized_Embeddings vectors of summed_embeddings
     normalized_embeddings = normalize_summed_embeddings(summed_embeddings)
-    normalize_user_id_embeddings = normalize_user_embeddings(summed_embeddings)
-   
-    # Define a list of user IDs for which you want to find healthy recipes (e.g., the first five users)
-    user_ids_to_rate = df['user_id'].unique()[:5]
+    normalize_user_id_embeddings = normalize_user_embeddings(summed_embeddings)       
 
-    for user_id in user_ids_to_rate:
-        # Call the function to rate healthy recipes for each user
-        user_healthy_recipes = rate_healthy_recipes_for_user(user_id, df)
+    # # Call the function to load and process the data
+    ground_truth_ratings = load_ground_truth_ratings(files_to_read, folder_path)
+       
+    #*****************************
 
-    recommendations = recommend_users_for_healthy_recipes(df, normalized_embeddings, similarity_threshold= 0.3, top_n_similar=5)
-
-    # # Print the top 5 similar users for the first 5 users
-    # user_ids = list(recommendations.keys())[:5]  # Get the first 5 user IDs
-    # for user_id in user_ids:
-    #     print(f"User ID: {user_id}")
-    #     print("Top 5 Similar Users:")
-    #     for similar_user_id in recommendations[user_id]['most_similar_user_ids']:
-    #         print(f"Similar User ID: {similar_user_id}")
-    #     print("\n")
-
-    # Call the function to load and process the data
-    ground_truth_ratings, ground_truth_labels, test_set_users = load_ground_truth_ratings(files_to_read, folder_path)
+    # Call the Recommendation_healthy_recipes function to get recommendations
+    similarity_threshold = 0.9  # Adjust the similarity threshold as needed     
     
-    # Library Metris Precision, Recall and F1-score
-    k_values = list(range(1, 21)) + [30, 40, 50]
-    print("Results for Different Values of Library Metris based k:")
-    print("=" * 55)
-    print(f"{'k':<5}{'Mean Precision':<20}{'Mean Recall':<20}{'Mean F1-score':<20}")
-    print("=" * 55)
+    # Define the top_k_values you want to evaluate
+    top_k_values = [10]
+    top_n_popular = 10  # You can adjust this value based on your preferences
+    test_size=0.3
+    for top_k in top_k_values:
+        # Call the Recommendation_healthy_recipes function
+        recommendations, actual_ratings = Recommendation_healthy_recipes(df, normalized_embeddings, similarity_threshold, top_k_values, top_n_popular)
+    
+    # Call the evaluation function
+    results = evaluate_recommendations_with_tp_fp_fn(df, normalized_embeddings, similarity_threshold, test_size, top_k_values=top_k_values)
 
+    # # Print or analyze the results for each k
+    # for k, metrics in results.items():
+    #     print(f"Results for k = {k}:")
+    #     print("================================")
+    #     print("Precision:", metrics['Precision'])
+    #     print("Recall:", metrics['Recall'])
+    #     print("F1-score:", metrics['F1-score'])
+    #     print("NDCG:", metrics['NDCG'])
+    #     print("================================")
+        
+    # Define the k values and print the header of the table
+    k_values = list(results.keys())
+    print("Results for Different Values of k:")
+    print("=" * 60)
+    print(f"{'k':<5}{'Precision':<15}{'Recall':<15}{'F1-score':<15}{'NDCG':<15}")
+    print("=" * 60)
+
+    # Print the results in the table format with increased spacing
     for k in k_values:
-        mean_precision, mean_recall, mean_f1 = evaluate_recommendation_system(normalize_user_id_embeddings, ground_truth_ratings, k)
-        print(f"{k:<5}{mean_precision:.4f}{' ':<5}{mean_recall:.4f}{' ':<5}{mean_f1:.4f}")
+        metrics = results[k]
+        precision = metrics['Precision']
+        recall = metrics['Recall']
+        f1_score = metrics['F1-score']
+        ndcg = metrics['NDCG']
+        print(f"{k:<5}{' ':<5}{precision:.4f}{' ':<5}{recall:.4f}{' ':<5}{f1_score:.4f}{' ':<5}{ndcg:.4f}")     
+        
+    # Calculate AUC_Recipe
+    AUC_popular=20
+    recommendations, actual_ratings = extract_recommendations_and_ratings(df, normalized_embeddings, similarity_threshold, AUC_popular)
+    auc_score = calculate_Recommendation_AUC(recommendations, actual_ratings, test_size)
 
-#--------Evaluation based-AUC -------------------
-
-    # Call AUC_ground_truth_ratings to construct ground truth ratings dictionary
-    A_ground_truth_ratings = AUC_ground_truth_ratings(files_to_read, folder_path)
-    
-    # Call AUC_evaluate_recommendation_system to calculate the mean AUC score
-    mean_auc = AUC_evaluate_recommendation_system (normalize_user_id_embeddings, A_ground_truth_ratings)
-
-    print("=====================================")
-    print(f"Mean AUC Score: {mean_auc:.4f}")
-    print("=====================================")
-    
+    # Print the AUC score
+    print(f"AUC Score: {auc_score}")
+  
 main()
